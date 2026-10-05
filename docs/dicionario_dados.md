@@ -1,67 +1,69 @@
-# Dicionario de Dados: Gestão Comercial de Shopping Center - Iguatemi
+# Dicionario de Dados: Gestao de Shopping Center
 
-Trio: AgenteDeVarejo  |  Banco: data/dataops.db (SQLite)
+Trio: AgenteDeVarejo | Banco: data/dataops.db (SQLite)
 
-## Tabela: lojas
+Este dicionario substitui o dominio anterior e passa a ser a fonte de verdade
+para o schema, a carga de dados e os testes automatizados do projeto.
+
+## Tabela: loja
 
 Descricao: uma linha por loja ou estabelecimento presente no shopping.
 
 | Coluna | Tipo | Restricoes | Descricao |
 | --- | --- | --- | --- |
-| id | INTEGER | PRIMARY KEY | Identificador da loja |
-| nome | TEXT | NOT NULL | Nome da loja |
-| categoria | TEXT | NOT NULL | Categoria comercial da loja |
-| piso | INTEGER | NOT NULL | Piso onde a loja está localizada |
-| area_m2 | REAL | NOT NULL | Area ocupada pela loja em metros quadrados |
-| aluguel_mensal | REAL | NOT NULL | Valor mensal do aluguel da loja |
-| inaugurada_em | DATETIME | NOT NULL | Data de inauguracao da loja |
+| id | INTEGER | PRIMARY KEY | Identificador unico da loja |
+| nome | VARCHAR(150) | NOT NULL | Nome comercial da loja |
+| categoria | VARCHAR(100) | NOT NULL | Categoria comercial da loja |
+| piso | INTEGER | NOT NULL | Piso onde a loja esta localizada |
+| inaugurada_em | TIMESTAMP | NOT NULL | Data de inauguracao do estabelecimento |
 
-## Tabela: vendas
+## Tabela: movimentacao
 
-Descricao: registros de vendas realizadas pelas lojas do shopping.
+Descricao: registros financeiros e operacionais de uma loja em uma data.
 
 | Coluna | Tipo | Restricoes | Descricao |
 | --- | --- | --- | --- |
-| id | INTEGER | PRIMARY KEY | Identificador da venda |
-| loja_id | INTEGER | FOREIGN KEY -> lojas.id, NOT NULL | Identificador da loja que realizou a venda |
-| valor | REAL | NOT NULL | Valor total da venda |
-| quantidade | INTEGER | NOT NULL | Quantidade de itens vendidos |
-| data_venda | DATETIME | NOT NULL | Data em que a venda foi realizada |
+| id | INTEGER | PRIMARY KEY | Identificador unico do registro de movimentacao |
+| loja_id | INTEGER | FOREIGN KEY -> loja.id, NOT NULL | Referencia a loja |
+| data | DATE | NOT NULL | Data a qual se refere a movimentacao |
+| rendimento | NUMERIC(12, 2) | NOT NULL | Faturamento ou receita da loja |
+| custos | NUMERIC(12, 2) | NOT NULL | Custos operacionais registrados |
+| movimentacao | INTEGER |  | Indicador quantitativo do fluxo de pessoas ou transacoes |
 
-## Tabela: fluxo_visitantes
+## Tabela: contrato
 
-Descricao: registros do fluxo de visitantes no shopping em diferentes períodos e pisos.
+Descricao: historico de contratos vinculados a cada loja.
 
 | Coluna | Tipo | Restricoes | Descricao |
 | --- | --- | --- | --- |
-| id | INTEGER | PRIMARY KEY | Identificador do registro de fluxo |
-| data | DATETIME | NOT NULL | Data da medicao |
-| periodo | TEXT | NOT NULL | Periodo do dia da medicao |
-| visitantes | INTEGER | NOT NULL | Quantidade de visitantes registrada |
-| piso | INTEGER | NOT NULL | Piso onde o fluxo foi registrado |
+| id | INTEGER | PRIMARY KEY | Identificador unico do contrato |
+| loja_id | INTEGER | FOREIGN KEY -> loja.id, NOT NULL | Referencia a loja |
+| data_inicio | DATE | NOT NULL | Inicio da vigencia do contrato |
+| data_fim | DATE | NOT NULL | Termino da vigencia do contrato |
+| status | VARCHAR(50) | NOT NULL | Situacao atual do contrato |
+| documento_url | TEXT |  | Link ou caminho para o documento digitalizado |
 
 ## Relacionamentos
 
-- lojas 1 --- N vendas
-- lojas 1 --- N fluxo_visitantes
+- loja 1 --- N movimentacao
+- loja 1 --- N contrato
 
 ## Perguntas de negocio que o assistente precisara responder
 
-1. Qual loja apresentou o maior faturamento no periodo?
-2. Qual categoria de lojas gera o maior faturamento?
-3. Qual piso apresenta o maior fluxo de visitantes?
-4. Qual loja possui o maior faturamento por metro quadrado?
-5. Qual e o ticket medio das vendas por categoria?
-6. Existem lojas com faturamento abaixo da media do shopping?
-7. Existem registros de vendas com valores negativos?
-8. Existe relacao entre o fluxo de visitantes e o faturamento das lojas?
+1. Qual e o faturamento total de todas as lojas somadas em um determinado mes?
+2. Quais contratos de locacao vencem nos proximos 30 dias?
+3. Qual loja gerou o maior rendimento acumulado no ultimo trimestre?
+4. Quais lojas estao com contratos em negociacao ou encerrados, mas continuam operando?
+5. Qual e a media de custos operacionais diarios agrupados por categoria de loja?
+6. Quais lojas registraram queda consecutiva no rendimento nos ultimos meses?
+7. Qual e o ranking das categorias de lojas mais presentes no shopping?
+8. Qual e o comportamento historico de fluxo e rendimento de uma loja especifica em finais de semana comparado aos dias uteis?
 
-## Anomalias que planejamos injetar (para o agente encontrar)
+## Anomalias que planejamos injetar
 
-- 4 lojas com aluguel mensal negativo
-- 3 lojas com area igual a zero
-- 5 vendas com valor negativo
-- 3 vendas com data no futuro
-- 4 registros de vendas duplicados
-- 5 registros de fluxo de visitantes com quantidade negativa
-- 2 lojas sem categoria
+- 4 quedas bruscas de rendimento.
+- 3 casos de custos superiores ao rendimento.
+- 3 movimentacoes depois do fim do contrato.
+- 2 lojas com contratos ativos sobrepostos.
+- 4 discrepancias entre movimentacao e rendimento.
+- 3 lacunas temporais no historico de movimentacao.

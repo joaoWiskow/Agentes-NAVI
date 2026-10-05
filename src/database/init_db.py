@@ -12,82 +12,73 @@ def conectar(caminho: Path = CAMINHO_DB) -> sqlite3.Connection:
     conexao = sqlite3.connect(caminho)
     conexao.row_factory = sqlite3.Row
 
-    # Ativa as chaves estrangeiras do SQLite em toda conexão.
+    # Ativa as chaves estrangeiras do SQLite em toda conexao.
     conexao.execute("PRAGMA foreign_keys = ON;")
 
     return conexao
 
 
 DDL = """
-CREATE TABLE IF NOT EXISTS pisos (
-    id          INTEGER PRIMARY KEY,
-    numero      INTEGER NOT NULL,
-    descricao   TEXT NOT NULL
-);
-
-
-CREATE TABLE IF NOT EXISTS lojas (
+CREATE TABLE IF NOT EXISTS loja (
     id              INTEGER PRIMARY KEY,
-    piso_id         INTEGER NOT NULL,
-    nome            TEXT NOT NULL,
-    categoria       TEXT NOT NULL,
-    area_m2         REAL NOT NULL,
-    aluguel_mensal  REAL NOT NULL,
-    inaugurada_em   DATETIME NOT NULL,
-
-    FOREIGN KEY (piso_id) REFERENCES pisos(id)
+    nome            VARCHAR(150) NOT NULL,
+    categoria       VARCHAR(100) NOT NULL,
+    piso            INTEGER NOT NULL,
+    inaugurada_em   TIMESTAMP NOT NULL
 );
 
 
-CREATE TABLE IF NOT EXISTS vendas (
-    id          INTEGER PRIMARY KEY,
-    loja_id     INTEGER NOT NULL,
-    valor       REAL NOT NULL,
-    quantidade  INTEGER NOT NULL,
-    data_venda  DATETIME NOT NULL,
+CREATE TABLE IF NOT EXISTS movimentacao (
+    id              INTEGER PRIMARY KEY,
+    loja_id         INTEGER NOT NULL,
+    data            DATE NOT NULL,
+    rendimento      NUMERIC(12, 2) NOT NULL,
+    custos          NUMERIC(12, 2) NOT NULL,
+    movimentacao    INTEGER,
 
-    FOREIGN KEY (loja_id) REFERENCES lojas(id)
+    CONSTRAINT fk_movimentacao_loja
+        FOREIGN KEY (loja_id)
+        REFERENCES loja(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
 );
 
 
-CREATE TABLE IF NOT EXISTS fluxo_visitantes (
-    id          INTEGER PRIMARY KEY,
-    piso_id     INTEGER NOT NULL,
-    data        DATETIME NOT NULL,
-    periodo     TEXT NOT NULL,
-    visitantes  INTEGER NOT NULL,
+CREATE TABLE IF NOT EXISTS contrato (
+    id              INTEGER PRIMARY KEY,
+    loja_id         INTEGER NOT NULL,
+    data_inicio     DATE NOT NULL,
+    data_fim        DATE NOT NULL,
+    status          VARCHAR(50) NOT NULL,
+    documento_url   TEXT,
 
-    FOREIGN KEY (piso_id) REFERENCES pisos(id)
+    CONSTRAINT fk_contrato_loja
+        FOREIGN KEY (loja_id)
+        REFERENCES loja(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
 );
 
 
--- Índices para acelerar consultas frequentes.
-
-CREATE INDEX IF NOT EXISTS idx_lojas_piso
-ON lojas(piso_id);
+CREATE INDEX IF NOT EXISTS idx_movimentacao_loja
+ON movimentacao(loja_id);
 
 
-CREATE INDEX IF NOT EXISTS idx_vendas_loja
-ON vendas(loja_id);
+CREATE INDEX IF NOT EXISTS idx_movimentacao_data
+ON movimentacao(data);
 
 
-CREATE INDEX IF NOT EXISTS idx_vendas_data
-ON vendas(data_venda);
+CREATE INDEX IF NOT EXISTS idx_contrato_loja
+ON contrato(loja_id);
 
 
-CREATE INDEX IF NOT EXISTS idx_fluxo_piso
-ON fluxo_visitantes(piso_id);
-
-
-CREATE INDEX IF NOT EXISTS idx_fluxo_data
-ON fluxo_visitantes(data);
+CREATE INDEX IF NOT EXISTS idx_contrato_datas
+ON contrato(data_inicio, data_fim);
 """
 
 
 def criar_tabelas(conexao: sqlite3.Connection) -> None:
-    """
-    Cria as tabelas, relacionamentos e índices do banco.
-    """
+    """Cria as tabelas, relacionamentos e indices do banco."""
 
     conexao.executescript(DDL)
     conexao.commit()
@@ -116,14 +107,8 @@ if __name__ == "__main__":
             """
         ).fetchall()
 
-        print(
-            "Tabelas criadas:",
-            [linha["name"] for linha in tabelas]
-        )
-
+        print("Tabelas criadas:", [linha["name"] for linha in tabelas])
         print(
             "Chaves estrangeiras ativas:",
-            conexao.execute(
-                "PRAGMA foreign_keys"
-            ).fetchone()[0]
+            conexao.execute("PRAGMA foreign_keys").fetchone()[0],
         )
