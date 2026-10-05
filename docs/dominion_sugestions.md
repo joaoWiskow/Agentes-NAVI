@@ -1,139 +1,155 @@
-Abaixo, apresento a lista estruturada de problemas por domínio de e-commerce, detalhando para cada um deles o **Evento X (Disparador)** e o **Artefato** técnico envolvido que provoca a falha:
+# Especificação Completa do Banco de Dados - Sistema de Gestão de Shopping Center
+
+Este documento abrange uma sugestão de mudança de dominio que se aprovada ira ser usada como a base para o desenvolvimento do trabalho e consolida a modelagem do banco de dados sugerido para a gestão de estabelecimentos em um shopping center, abrangendo o modelo conceitual, lógico, físico (DDL) e as perguntas de negócio (consultas analíticas).
 
 ---
 
-### 1. Domínio: Clientes (*Customers / Users*)
+## 1. Modelo Conceitual (DER)
 
-* **Problema 1: Duplicidade de Cadastros por Concorrência**
-* **Artefato Afetado:** Script de ingestão/pipeline de consolidação de usuários (ETL em Python/SQL) e tabela dimensão `dim_customers`.
-* **Evento X:** Duas solicitações de cadastro simultâneas (ex: App mobile e Web) vindas de microsserviços distintos chegam no mesmo segundo sem chave de idempotência, gerando IDs diferentes para o mesmo cliente.
+O modelo conceitual define as três entidades centrais do sistema, seus atributos principais e as cardinalidades dos relacionamentos.
 
+### Entidades e Atributos
+* **`LOJA`**
+  * `id` (PK)
+  * `nome`
+  * `categoria`
+  * `piso`
+  * `inaugurada_em`
 
-* **Problema 2: Exposição Inadequada de Dados Sensíveis (LGPD)**
-* **Artefato Afetado:** Script de anonimização/máscara de dados e tabela de logs de acesso de usuários.
-* **Evento X:** Uma alteração em uma função utilitária de mascaramento de strings é enviada para produção sem testes unitários, fazendo com que dados de CPF e telefone passem a ser gravados em texto plano.
+* **`MOVIMENTACAO`**
+  * `id` (PK)
+  * `loja_id` (FK $\rightarrow$ `Loja`)
+  * `data`
+  * `rendimento`
+  * `custos`
+  * `movimentacao`
 
+* **`CONTRATO`**
+  * `id` (PK)
+  * `loja_id` (FK $\rightarrow$ `Loja`)
+  * `data_inicio`
+  * `data_fim`
+  * `status`
+  * `documento_url`
 
-* **Problema 3: Tempos de Espera Longos (Latência no Perfil)**
-* **Artefato Afetado:** Consulta SQL analítica de segmentação e tabela de fatos de clientes no Data Warehouse.
-* **Evento X:** Um volume atípico de consultas pesadas de marketing roda simultaneamente em uma tabela volumosa de clientes que não possui particionamento ou índices adequados, estourando o *timeout* da API.
-
-
-
----
-
-### 2. Domínio: Catálogo de Produtos e Categorias (*Products & Catalog*)
-
-* **Problema 1: Órfãos de Categoria por Deleção Indevida**
-* **Artefato Afetado:** Tabela dimensão de produtos (`dim_products`), tabelas fato e script de carga incremental.
-* **Evento X:** Um produto é excluído ou reestruturado diretamente no banco de dados do ERP de origem, rompendo o relacionamento de chave estrangeira com a árvore de categorias no Data Lake.
-
-
-* **Problema 2: Inconsistência de Moeda ou Casas Decimais**
-* **Artefato Afetado:** Script de transformação de preços e tabela de catálogo de produtos.
-* **Evento X:** O sistema de origem altera acidentalmente o formato de envio do preço de um inteiro em centavos (ex: `1999`) para um float com ponto (ex: `19.99`), distorcendo os cálculos subsequentes.
-
-
-* **Problema 3: Tempos de Espera Longos (Sincronização de Catálogo Massivo)**
-* **Artefato Afetado:** Rotina de carga *Full Load* (ETL diário) conectada ao banco de dados transacional.
-* **Evento X:** O job de extração executa uma varredura completa (*Full Table Scan*) sem paginação em um catálogo com milhões de SKUs, bloqueando tabelas operacionais (*table locks*) e travando o sistema.
-
-
+### Relacionamentos e Cardinalidade
+* **`Loja` (1) $\longleftrightarrow$ (N) `Movimentacao`**: Uma loja possui múltiplos registros de movimentação ao longo do tempo, mas cada registro pertence a uma única loja.
+* **`Loja` (1) $\longleftrightarrow$ (N) `Contrato`**: Uma loja pode possuir um histórico de múltiplos contratos ao longo dos anos, mas cada contrato está vinculado a uma única loja.
 
 ---
 
-### 3. Domínio: Pedidos e Transações (*Orders & Payments*)
+## 2. Modelo Lógico Relacional
 
-* **Problema 1: Quebra de Schema por Alteração no Gateway de Pagamento**
-* **Artefato Afetado:** Pipeline de ingestão de pagamentos (DAG do Airflow/script de API) e schema da tabela de transações.
-* **Evento X:** A API do gateway de pagamento parceiro é atualizada e o campo de retorno `transaction_id` é renomeado para `payment_reference` sem aviso prévio, fazendo o pipeline falhar.
+No modelo lógico, detalhamos os tipos de dados, as chaves primárias (PK) e as chaves estrangeiras (FK).
 
+* **`loja`**
+  * `id` : `INTEGER` (PK) — Identificador único da loja.
+  * `nome` : `VARCHAR(150)` [NOT NULL] — Nome comercial da loja.
+  * `categoria` : `VARCHAR(100)` [NOT NULL] — Categoria comercial (ex: Vestuário, Alimentação).
+  * `piso` : `INTEGER` [NOT NULL] — Andar/piso onde a loja está localizada.
+  * `inaugurada_em` : `TIMESTAMP` [NOT NULL] — Data de inauguração do estabelecimento.
 
-* **Problema 2: Pedidos Fantasmas (Falta de Idempotência)**
-* **Artefato Afetado:** Tabela transacional de pedidos (`fact_orders`) e rotina de gravação no banco.
-* **Evento X:** Uma falha de rede temporária faz com que o cliente ou o microsserviço de checkout reenvie o mesmo payload de pedido duplicado antes de receber a confirmação de sucesso.
+* **`movimentacao`**
+  * `id` : `INTEGER` (PK) — Identificador único do registro de movimentação.
+  * `loja_id` : `INTEGER` (FK references `loja(id)`) [NOT NULL] — Referência à loja.
+  * `data` : `DATE` [NOT NULL] — Data a qual se refere a movimentação.
+  * `rendimento` : `DECIMAL(12, 2)` [NOT NULL] — Faturamento ou receita da loja.
+  * `custos` : `DECIMAL(12, 2)` [NOT NULL] — Custos operacionais registrados.
+  * `movimentacao` : `INTEGER` — Indicador quantitativo do fluxo de pessoas ou transações.
 
-
-* **Problema 3: Tempos de Espera Longos (Gatilho de Confirmação Bloqueado)**
-* **Artefato Afetado:** Fila de mensagens (ex: RabbitMQ/Kafka) e microsserviço de faturamento.
-* **Evento X:** Um pico repentino de compras (ex: Black Friday) sobrecarrega a fila de eventos de pagamento, criando um gargalo que atrasa em horas a confirmação da compra para o usuário.
-
-
-
----
-
-### 4. Domínio: Estoque e Logística (*Inventory & Fulfillment*)
-
-* **Problema 1: Divergência de Inventário (Venda Sem Estoque)**
-* **Artefato Afetado:** Tabela de estoque atual (`dim_inventory`) e API de checagem do carrinho.
-* **Evento X:** O atraso na propagação de eventos de baixa de estoque em tempo real entre o armazém físico e o site faz com que múltiplos clientes comprem o último item simultaneamente.
-
-
-* **Problema 2: Corrupção na Linhagem de Rastreio**
-* **Artefato Afetado:** Tabela de rastreamento de entregas e pipeline de integração com a transportadora.
-* **Evento X:** Webhooks da transportadora chegam fora de ordem cronológica (ex: o evento de "Entregue" é processado antes de "Saiu para entrega"), corrompendo métricas de prazo.
-
-
-* **Problema 3: Tempos de Espera Longos (Lock de Reserva de Carrinho)**
-* **Artefato Afetado:** Banco de dados transacional e stored procedures de travamento de estoque.
-* **Evento X:** Concorrência extrema em itens de alta demanda gera bloqueios cruzados (*deadlocks*) no banco de dados relacional no momento do checkout, congelando a tela do usuário.
-
-
+* **`contrato`**
+  * `id` : `INTEGER` (PK) — Identificador único do contrato.
+  * `loja_id` : `INTEGER` (FK references `loja(id)`) [NOT NULL] — Referência à loja.
+  * `data_inicio` : `DATE` [NOT NULL] — Início da vigência do contrato.
+  * `data_fim` : `DATE` [NOT NULL] — Término da vigência do contrato.
+  * `status` : `VARCHAR(50)` [NOT NULL] — Situação atual (ex: 'Ativo', 'Encerrado').
+  * `documento_url` : `TEXT` — Link ou caminho para o documento digitalizado (PDF).
 
 ---
 
-### 5. Domínio: Eventos de Clique e Navegação (*Clickstream / Web Analytics*)
+## 3. Modelo Físico (Script SQL DDL)
 
-* **Problema 1: Explosão de Volume por Bots (Anomalia de Ingestão)**
-* **Artefato Afetado:** Pipeline de ingestão de *stream* (ex: Kafka/Spark Streaming) e storage de logs brutos no Data Lake.
-* **Evento X:** Um ataque de *scrapers/bots* automatizados dispara milhões de acessos falsos por minuto, inundando o pipeline e elevando drasticamente o custo de processamento.
+```sql
+-- Criação da tabela LOJA
+CREATE TABLE loja (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR(150) NOT NULL,
+    categoria VARCHAR(100) NOT NULL,
+    piso INTEGER NOT NULL,
+    inaugurada_em TIMESTAMP NOT NULL
+);
 
+-- Criação da tabela MOVIMENTACAO
+CREATE TABLE movimentacao (
+    id SERIAL PRIMARY KEY,
+    loja_id INTEGER NOT NULL,
+    data DATE NOT NULL,
+    rendimento NUMERIC(12, 2) NOT NULL,
+    custos NUMERIC(12, 2) NOT NULL,
+    movimentacao INTEGER,
+    CONSTRAINT fk_movimentacao_loja 
+        FOREIGN KEY (loja_id) 
+        REFERENCES loja(id) 
+        ON DELETE CASCADE 
+        ON UPDATE CASCADE
+);
 
-* **Problema 2: Perda de Rastreamento de UTMs**
-* **Artefato Afetado:** Script de captura de tags no front-end e tabela de eventos de clique.
-* **Evento X:** Uma alteração no layout da página web remove acidentalmente os parâmetros de URL de campanhas (*UTMs*), fazendo o sistema registrar todo o tráfego como "Direto".
+-- Criação da tabela CONTRATO
+CREATE TABLE contrato (
+    id SERIAL PRIMARY KEY,
+    loja_id INTEGER NOT NULL,
+    data_inicio DATE NOT NULL,
+    data_fim DATE NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    documento_url TEXT,
+    CONSTRAINT fk_contrato_loja 
+        FOREIGN KEY (loja_id) 
+        REFERENCES loja(id) 
+        ON DELETE CASCADE 
+        ON UPDATE CASCADE
+);
 
-
-* **Problema 3: Tempos de Espera Longos (Demora na Compactação Parquet)**
-* **Artefato Afetado:** Diretório de arquivos brutos no Data Lake e consultas analíticas *ad-hoc*.
-* **Evento X:** O acúmulo excessivo de pequenos arquivos de log gerados a cada minuto sem uma rotina de compactação (*compaction job*) obriga o motor de consulta a varrer milhares de arquivos miúdos, multiplicando o tempo de resposta.
-
-
+```
 
 ---
 
-### 6. Domínio: Marketing e Campanhas (*Marketing & Attribution*)
+## 4. Perguntas de Negócio (Consultas Analíticas e Operacionais)
 
-* **Problema 1: Duplicação de Atribuição de Canais**
-* **Artefato Afetado:** Tabela de atribuição de vendas e modelo de cruzamento de dados de anúncios.
-* **Evento X:** Múltiplas plataformas de anúncios (Google e Meta) enviam relatórios de conversão sobrepostos que não utilizam uma chave de desduplicação unificada, superestimando o ROI.
+As seguintes questões representam as principais necessidades de informação que a administração do shopping center pode extrair utilizando a estrutura do banco de dados:
 
-
-* **Problema 2: Desatualização de Custos de Anúncios**
-* **Artefato Afetado:** Tabela de custos de marketing (`fact_marketing_spend`) e pipeline de integração via API de mídias.
-* **Evento X:** A chave de acesso (*token*) da API de uma rede social expira silenciosamente, travando a ingestão diária de custos enquanto os dados de conversão continuam entrando.
+1. **Qual é o faturamento total (rendimento) de todas as lojas somadas em um determinado mês?**
+* *Objetivo:* Medir a saúde financeira global do shopping e o volume de circulação de capital.
 
 
-* **Problema 3: Tempos de Espera Longos (Modelos de Atribuição Multitoque Complexos)**
-* **Artefato Afetado:** Script de Machine Learning / processamento em lote (ex: modelo Markov Chain ou Shapley Value).
-* **Evento X:** O volume da jornada de cliques de milhões de usuários processados em conjunto excede a capacidade de memória do cluster de processamento (ex: Spark/Databricks), fazendo o job rodar por horas ou falhar por falta de recursos.
+2. **Quais são os contratos de locação que vencem nos próximos 30 dias?**
+* *Objetivo:* Permitir ações preventivas da equipe jurídica e comercial para renovações ou reajustes.
+
+
+3. **Qual é a loja que gerou o maior rendimento acumulado no último trimestre?**
+* *Objetivo:* Identificar os estabelecimentos de melhor performance no mix comercial.
+
+
+4. **Quais lojas estão com contratos em status de negociação ou encerrados, mas continuam operando?**
+* *Objetivo:* Garantir o compliance jurídico e evitar ocupações irregulares.
+
+
+5. **Qual é a média de custos operacionais diários agrupados por categoria de loja?**
+* *Objetivo:* Analisar quais setores possuem maior peso de manutenção ou operação interna.
+
+
+6. **Quais lojas registraram queda consecutiva no rendimento nos últimos meses?**
+* *Objetivo:* Identificar lojistas em risco financeiro para ações de suporte ou renegociação.
+
+
+7. **Qual é o ranking das categorias de lojas mais presentes no shopping com base na quantidade de estabelecimentos?**
+* *Objetivo:* Monitorar a diversidade do mix comercial e evitar a saturação de segmentos.
+
+
+8. **Qual é o comportamento histórico de fluxo e rendimento de uma loja específica em finais de semana comparado aos dias úteis?**
+* *Objetivo:* Avaliar o impacto de dias de pico na operação do estabelecimento.
 
 
 
----
+```
 
-### 7. Domínio: Atendimento ao Cliente e Pós-Venda (*Customer Support / CRM*)
-
-* **Problema 1: Cruzamento Órfão de Devoluções**
-* **Artefato Afetado:** Tabela de tickets de suporte/devoluções e tabela fato de pedidos.
-* **Evento X:** Um atendente digita incorretamente o ID do pedido ao registrar uma solicitação de troca, quebrando o relacionamento analítico entre o suporte e a venda original.
-
-
-* **Problema 2: Estouro de Conexão em Webhooks de Chat**
-* **Artefato Afetado:** Microsserviço receptor de webhooks e tabela de satisfação do cliente (*CSAT*).
-* **Evento X:** O sistema externo de atendimento envia um lote massivo de atualizações acumuladas de uma só vez, sobrecarregando as conexões ativas com o banco de dados.
-
-
-* **Problema 3: Tempos de Espera Longos (Processamento de NLP em Reviews)**
-* **Artefato Afetado:** Pipeline de análise de sentimentos e tabela de avaliações de produtos.
-* **Evento X:** Uma campanha promocional gera um pico enorme de novas avaliações de produtos em texto, e o job de processamento de linguagem natural (NLP) em lote roda em uma única thread síncrona, deixando o painel de qualidade desatualizado por dias.
+```
