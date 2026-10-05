@@ -1,0 +1,20 @@
+# Segredos: NUNCA versionar
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Banco de dados gerado (recriado por init_db.py e seed_data.py)
+data/*.db
+!data/.gitkeep
+
+# Ferramentas
+.DS_Store
+.streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+
+
