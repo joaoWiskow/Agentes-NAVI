@@ -12,7 +12,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-# Torna src/database importável a partir dos testes (namespace package).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from database.init_db import conectar, criar_tabelas, resetar_banco
@@ -29,7 +28,6 @@ INDICES_ESPERADOS = {
 
 class SmokeTestBanco(unittest.TestCase):
     def setUp(self):
-        # Arrange compartilhado: banco novo em diretório temporário.
         self.tmp = tempfile.TemporaryDirectory()
         self.caminho_db = Path(self.tmp.name) / "dataops.db"
         self.conexao = conectar(self.caminho_db)
@@ -39,7 +37,7 @@ class SmokeTestBanco(unittest.TestCase):
         self.conexao.close()
         self.tmp.cleanup()
 
-    # -- helpers --------------------------------------------------------
+
 
     def _nomes_no_sqlite_master(self, tipo: str) -> set:
         linhas = self.conexao.execute(
@@ -58,7 +56,6 @@ class SmokeTestBanco(unittest.TestCase):
         assert cursor.lastrowid is not None
         return cursor.lastrowid
 
-    # -- conectar ---------------------------------------------------------
 
     def test_conectar_cria_diretorio_pai_e_arquivo_do_banco(self):
         caminho_novo = Path(self.tmp.name) / "aninhado" / "outro.db"
@@ -76,7 +73,6 @@ class SmokeTestBanco(unittest.TestCase):
             self.conexao.execute("PRAGMA foreign_keys").fetchone()[0], 1
         )
 
-    # -- criar_tabelas ----------------------------------------------------
 
     def test_criar_tabelas_cria_as_quatro_tabelas(self):
         self.assertEqual(
@@ -94,7 +90,6 @@ class SmokeTestBanco(unittest.TestCase):
             self._nomes_no_sqlite_master("table"), TABELAS_ESPERADAS
         )
 
-    # -- integridade ------------------------------------------------------
 
     def test_roundtrip_piso_loja_venda_e_fluxo(self):
         piso_id = self._inserir_piso()
@@ -151,8 +146,6 @@ class SmokeTestBanco(unittest.TestCase):
                 " aluguel_mensal, inaugurada_em) VALUES (?, ?, ?, ?, ?, ?)",
                 (piso_id, None, "Moda", 10.0, 100.0, "2024-01-01"),
             )
-
-    # -- resetar_banco -----------------------------------------------------
 
     def test_resetar_banco_apaga_o_arquivo_do_banco(self):
         self.conexao.close()
