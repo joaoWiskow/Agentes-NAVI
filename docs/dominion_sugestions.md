@@ -1,6 +1,8 @@
 # Especificação Completa do Banco de Dados - Sistema de Gestão de Shopping Center
 
-Este documento abrange uma sugestão de mudança de dominio que se aprovada ira ser usada como a base para o desenvolvimento do trabalho e consolida a modelagem do banco de dados sugerido para a gestão de estabelecimentos em um shopping center, abrangendo o modelo conceitual, lógico, físico (DDL) e as perguntas de negócio (consultas analíticas).
+
+
+Este documento abrange uma sugestão de mudança de dominio que se aprovada ira ser usada como a base para o desenvolvimento do trabalho e consolida a modelagem do banco de dados sugerido para a gestão de estabelecimentos em um shopping center, abrangendo o modelo conceitual, lógico, físico (DDL) e as perguntas de negócio (consultas analíticas) e as anomalias/regras de integridade.
 
 ---
 
@@ -150,6 +152,15 @@ As seguintes questões representam as principais necessidades de informação qu
 
 
 
-```
+---
 
-```
+## 5. Anomalias e Inconsistências de Negócio a Monitorar
+
+As seguintes situações descrevem anomalias operacionais, financeiras ou jurídicas que o sistema deve ser capaz de detectar para auditoria e controle:
+
+1. **Queda Brusca e Incompatível de Rendimento:** Redução repentina superior a 70% no faturamento diário de uma loja sem justificativa sazonal ou de calendário, indicando possível subnotificação de caixa ou tentativa de burlar aluguel percentual.
+2. **Divergência Crítica entre Custos e Rendimento:** Registros em que os custos operacionais superam o rendimento de forma contínua por períodos prolongados, alertando para risco de falência ou abandono da loja.
+3. **Inconsistência Temporal Contratual:** Existência de registros de movimentação cujas datas são posteriores à data de término (`data_fim`) do contrato vigente, configurando operação irregular sem respaldo jurídico.
+4. **Sobreposição de Contratos Ativos:** Presença de dois ou mais contratos com status `'Ativo'` vinculados simultaneamente à mesma loja, violando a unicidade da locação do espaço físico.
+5. **Discrepância entre Fluxo de Pessoas e Faturamento:** Dias em que a movimentação de pessoas na loja é expressivamente alta, mas o rendimento reportado é próximo de zero (ou vice-versa), sinalizando falha de integração ou fraude nos dados de PDV.
+6. **Lacunas Temporais no Histórico (Missing Data):** Interrupção abrupta no envio de registros diários de movimentação por parte de uma loja, apontando falha técnica de coleta, fechamento não comunicado ou problemas operacionais graves.
