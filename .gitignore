@@ -17,4 +17,5 @@ data/*.db
 .env.*
 !.env.example
 
-
+#.gitignore secretos
+*.gitignore

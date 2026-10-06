@@ -2,7 +2,7 @@ import re
 import sqlite3
 import time
 
-from src.database.init_db import CAMINHO_DB
+from ..database.init_db import CAMINHO_DB
 
 LIMITE_MAXIMO = 50
 
@@ -19,11 +19,9 @@ def garantir_limit(query: str, limite: int) -> str:
     query = query.strip().rstrip(";").strip()
     correspondencia = re.search(r"\blimit\s+(\d+)\s*$", query, flags=re.IGNORECASE)
     if correspondencia is None:
-        # TODO: retorne a query com " LIMIT {limite}" acrescentado ao final
-        ...
+        return f"{query} LIMIT {limite}"
     if int(correspondencia.group(1)) > limite:
-        # TODO: substitua o valor do LIMIT existente por `limite` e retorne a query
-        ...
+        return re.sub(r"(\blimit\s+)\d+\s*$", rf"\1{limite}", query, flags=re.IGNORECASE)
     return query
 
 
@@ -38,10 +36,8 @@ def executar_query_analitica(query: str, limite_linhas: int = 50) -> dict:
     try:
         with conectar_somente_leitura() as conexao:
             cursor = conexao.execute(query_final)
-            # TODO: leia os nomes das colunas de cursor.description (primeiro item de cada tupla)
-            colunas = []
-            # TODO: converta cada linha de cursor.fetchall() em dict {coluna: valor}
-            linhas = []
+            colunas = [desc[0] for desc in cursor.description] if cursor.description else []
+            linhas = [dict(zip(colunas, linha)) for linha in cursor.fetchall()]
     except sqlite3.Error as erro:
         return {"sucesso": False, "erro": f"{type(erro).__name__}: {erro}", "query_executada": query_final}
     tempo_ms = round((time.perf_counter() - inicio) * 1000, 2)
@@ -56,11 +52,11 @@ def executar_query_analitica(query: str, limite_linhas: int = 50) -> dict:
 
 
 if __name__ == "__main__":
-    print(executar_query_analitica("SELECT cidade, COUNT(*) AS total FROM clientes GROUP BY cidade"))
-    print(executar_query_analitica("SELECT * FROM pedidos LIMIT 500")["total_linhas"])
-    print(executar_query_analitica("SELECT coluna_inexistente FROM clientes"))
+    print(executar_query_analitica("SELECT categoria, COUNT(*) AS total FROM loja GROUP BY categoria"))
+    print(executar_query_analitica("SELECT * FROM movimentacao LIMIT 500")["total_linhas"])
+    print(executar_query_analitica("SELECT coluna_inexistente FROM loja"))
     # Prova da conexao somente leitura: tentamos escrever direto, sem passar pelo executor
     try:
-        conectar_somente_leitura().execute("DELETE FROM clientes")
+        conectar_somente_leitura().execute("DELETE FROM loja")
     except sqlite3.OperationalError as erro:
         print("Escrita recusada:", erro)
