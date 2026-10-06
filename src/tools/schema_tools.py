@@ -19,8 +19,7 @@ def validar_tabela(conexao, nome_tabela: str) -> str:
 def listar_tabelas() -> list[str]:
     """Lista os nomes de todas as tabelas de dados do banco. Use SEMPRE como primeiro passo."""
     with conectar() as conexao:
-        # TODO: retorne _tabelas_existentes(conexao)
-        ...
+        return _tabelas_existentes(conexao)
 
 
 def descrever_schema_tabela(nome_tabela: str) -> dict:
@@ -28,8 +27,15 @@ def descrever_schema_tabela(nome_tabela: str) -> dict:
     with conectar() as conexao:
         validar_tabela(conexao, nome_tabela)
         colunas = []
-        # TODO: percorra conexao.execute(f"PRAGMA table_info({nome_tabela})") e acrescente, para cada linha,
-        #       {"nome": ..., "tipo": ..., "obrigatoria": bool(notnull), "chave_primaria": bool(pk)}
+        for linha in conexao.execute(f"PRAGMA table_info({nome_tabela})"):
+            colunas.append(
+                {
+                    "nome": linha["name"],
+                    "tipo": linha["type"],
+                    "obrigatoria": bool(linha["notnull"]),
+                    "chave_primaria": bool(linha["pk"]),
+                }
+            )
         return {"tabela": nome_tabela, "colunas": colunas}
 
 
@@ -37,9 +43,16 @@ def obter_chaves_estrangeiras(nome_tabela: str) -> list[dict]:
     """Lista as chaves estrangeiras de uma tabela. Use antes de escrever qualquer JOIN."""
     with conectar() as conexao:
         validar_tabela(conexao, nome_tabela)
-        # TODO: percorra PRAGMA foreign_key_list e retorne
-        #       [{"coluna_local": from, "tabela_referenciada": table, "coluna_referenciada": to}]
-        ...
+        return [
+            {
+                "coluna_local": linha["from"],
+                "tabela_referenciada": linha["table"],
+                "coluna_referenciada": linha["to"],
+            }
+            for linha in conexao.execute(
+                f"PRAGMA foreign_key_list({nome_tabela})"
+            )
+        ]
 
 
 if __name__ == "__main__":
