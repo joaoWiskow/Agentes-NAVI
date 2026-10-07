@@ -39,9 +39,9 @@ def executar_query_analitica(query: str, limite: int = 50) -> dict:
             "query_executada": None,
             "guardrail": {"aprovada": False, "motivo": motivo},
         }
-    # TODO: chame query_tools.executar_query_analitica(query, limite), acrescente ao resultado
-    #       a chave "guardrail": {"aprovada": True, "motivo": motivo} e retorne
-    ...
+    resultado = query_tools.executar_query_analitica(query, limite)
+    resultado["guardrail"] = {"aprovada": True, "motivo": motivo}
+    return resultado
 
 
 @mcp.tool()
