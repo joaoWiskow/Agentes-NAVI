@@ -20,30 +20,27 @@ def validar_query_segura(query: str) -> tuple[bool, str]:
 
     texto = query.strip()
 
-    # Regra 1: comentarios SQL escondem intencoes; nao aceitamos nenhum
-    if "--" in texto or "/*" in texto or "*/" in texto:
-        # TODO: retorne (False, "Comentarios SQL nao sao permitidos")
-        ...
-
     limpo = _remover_literais(texto)
     normalizado = re.sub(r"\s+", " ", limpo).strip().upper()
 
+    # Regra 1: comentarios SQL escondem intencoes; nao aceitamos nenhum.
+    if "--" in normalizado or "/*" in normalizado or "*/" in normalizado:
+        return False, "Comentarios SQL nao sao permitidos"
+
     # Regra 2: um unico statement (aceitamos no maximo um ';' e somente no final)
-    sem_ponto_final = normalizado.rstrip(";").strip()
-    if ";" in sem_ponto_final:
-        # TODO: retorne (False, "Multiplos statements nao sao permitidos")
-        ...
+    if normalizado.count(";") > 1 or (";" in normalizado and not normalizado.endswith(";")):
+        return False, "Multiplos statements nao sao permitidos"
+    sem_ponto_final = normalizado[:-1].rstrip() if normalizado.endswith(";") else normalizado
 
     # Regra 3: lista de permissoes: apenas SELECT ou WITH
     if not (sem_ponto_final.startswith("SELECT ") or sem_ponto_final.startswith("WITH ")):
-        # TODO: retorne (False, "Apenas consultas SELECT/WITH sao permitidas")
-        ...
+        return False, "Apenas consultas SELECT/WITH sao permitidas"
 
     # Regra 4: lista de proibicoes, aplicada dentro do statement unico (protege "WITH ... DELETE")
     for padrao in PADROES_PROIBIDOS:
         if re.search(padrao, sem_ponto_final):
-            # TODO: retorne (False, f"Comando proibido detectado: {padrao}") com o padrao sem as barras de regex
-            ...
+            comando = padrao.replace(r"\b", "").replace(r"\s+", " ")
+            return False, f"Comando proibido detectado: {comando}"
 
     return True, "Query aprovada"
 

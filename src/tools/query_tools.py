@@ -2,6 +2,8 @@ import re
 import sqlite3
 import time
 
+from ..agent.guardrails import validar_query_segura
+
 from ..database.init_db import CAMINHO_DB
 
 LIMITE_MAXIMO = 50
@@ -25,13 +27,32 @@ def garantir_limit(query: str, limite: int) -> str:
     return query
 
 
+def validar_query_analitica(query: str) -> str:
+    """Valida a consulta antes de enviá-la ao banco."""
+    aprovada, motivo = validar_query_segura(query)
+    if not aprovada:
+        raise ValueError(motivo)
+    return query.strip()
+
+
 def executar_query_analitica(query: str, limite_linhas: int = 50) -> dict:
     """Executa uma consulta SQL de LEITURA (SELECT) e retorna colunas, linhas e o tempo gasto.
 
     Use somente depois de consultar o schema. O resultado e limitado a no maximo 50 linhas.
     """
     limite = max(1, min(limite_linhas, LIMITE_MAXIMO))
-    query_final = garantir_limit(query, limite)
+    try:
+        query_validada = validar_query_analitica(query)
+    except ValueError as erro:
+        motivo = str(erro)
+        return {
+            "sucesso": False,
+            "erro": f"Guardrail: {motivo}",
+            "query_executada": None,
+            "guardrail": {"aprovada": False, "motivo": motivo},
+        }
+    motivo = "Query aprovada"
+    query_final = garantir_limit(query_validada, limite)
     inicio = time.perf_counter()
     try:
         with conectar_somente_leitura() as conexao:
@@ -44,6 +65,7 @@ def executar_query_analitica(query: str, limite_linhas: int = 50) -> dict:
     return {
         "sucesso": True,
         "query_executada": query_final,
+        "guardrail": {"aprovada": True, "motivo": motivo},
         "colunas": colunas,
         "linhas": linhas,
         "total_linhas": len(linhas),
