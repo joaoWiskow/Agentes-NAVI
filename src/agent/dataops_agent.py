@@ -13,7 +13,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 load_dotenv()
-MODEL = "gemini-3.8-flash"
+MODEL = "gemini-3.5-flash-lite"
 RAIZ = Path(__file__).resolve().parents[2]
 
 INSTRUCAO = (
@@ -82,6 +82,7 @@ class DataOpsAgent:
             )
             self.historico.append(response.candidates[0].content)
 
+            # TODO: se NAO houver response.function_calls, retorne {"resposta": response.text, "trace": trace}
             if not response.function_calls:
                 return {"resposta": response.text, "trace": trace}
 
@@ -90,6 +91,8 @@ class DataOpsAgent:
                 inicio = time.perf_counter()
                 if self._sessao is None:
                     raise RuntimeError("Sessao MCP nao inicializada")
+                # TODO: execute a ferramenta com self._sessao.call_tool(chamada.name, dict(chamada.args))
+                #       e guarde o retorno em resultado_mcp
                 resultado_mcp = await self._sessao.call_tool(chamada.name, dict(chamada.args))
                 tempo_ms = round((time.perf_counter() - inicio) * 1000, 2)
                 conteudo = ler_resultado(resultado_mcp)
@@ -115,7 +118,7 @@ class DataOpsAgent:
 
 async def demo() -> None:
     async with DataOpsAgent() as agente:
-        saida = await agente.perguntar("Quantos clientes nao tem e-mail cadastrado?")
+        saida = await agente.perguntar("Liste as tabelas existentes")
         print(saida["resposta"])
         for passo in saida["trace"]:
             print(f"  turno {passo['turno']}: {passo['ferramenta']} {passo['argumentos']} ({passo['tempo_ms']} ms)")
