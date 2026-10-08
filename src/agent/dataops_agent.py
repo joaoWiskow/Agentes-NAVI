@@ -13,7 +13,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 load_dotenv()
-MODEL = "gemini-3.8-flash"
+MODEL = "gemini-3.1-flash-lite"
 RAIZ = Path(__file__).resolve().parents[2]
 
 INSTRUCAO = (
@@ -115,7 +115,7 @@ class DataOpsAgent:
 
 async def demo() -> None:
     async with DataOpsAgent() as agente:
-        saida = await agente.perguntar("Quantos clientes nao tem e-mail cadastrado?")
+        saida = await agente.perguntar("Liste as tabelas existentes")
         print(saida["resposta"])
         for passo in saida["trace"]:
             print(f"  turno {passo['turno']}: {passo['ferramenta']} {passo['argumentos']} ({passo['tempo_ms']} ms)")
