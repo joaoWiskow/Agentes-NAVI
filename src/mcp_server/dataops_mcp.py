@@ -1,12 +1,12 @@
 import sys
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from src.agent.guardrails import validar_query_segura
 from src.tools import profiling_tools, query_tools, schema_tools
 
 
-mcp = FastMCP("dataops-agent")
+mcp = MCPServer("dataops-agent")
 
 
 @mcp.tool()
