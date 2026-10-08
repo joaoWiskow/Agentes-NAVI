@@ -51,34 +51,38 @@ def main() -> None:
     st.caption("Assistente de auditoria de dados: somente leitura, com rastreabilidade de cada ferramenta.")
     inicializar_estado()
 
-    # TODO: redesenhe o historico: percorra st.session_state.messages e chame renderizar_mensagem em cada uma
+    for mensagem in st.session_state.messages:
+        renderizar_mensagem(mensagem)
 
     pergunta = st.chat_input("Pergunte algo sobre os dados...")
     if pergunta:
-        # TODO: acrescente {"role": "user", "content": pergunta} ao estado e renderize a mensagem do usuario
+        st.session_state.messages.append({"role": "user", "content": pergunta})
+        with st.chat_message("user"):
+            st.markdown(pergunta)
         with st.spinner("Consultando o agente..."):
             try:
                 saida = perguntar_ao_agente(pergunta)
                 resposta = {"role": "assistant", "content": saida["resposta"], "trace": saida["trace"]}
             except Exception as erro:
                 resposta = {"role": "assistant", "content": f"Nao consegui concluir: {erro}", "trace": []}
-        # TODO: acrescente "resposta" ao estado e renderize a mensagem do assistente
+        st.session_state.messages.append(resposta)
+        renderizar_mensagem(resposta)
 
 def renderizar_trace(trace: list[dict]) -> None:
     with st.expander(f"Rastro de ferramentas ({len(trace)} chamadas)", expanded=False):
         for passo in trace:
             st.markdown(f"**Turno {passo['turno']}: `{passo['ferramenta']}`** ({passo['tempo_ms']} ms)")
-            # TODO: mostre os argumentos com st.json(passo["argumentos"])
+            st.json(passo["argumentos"])
 
             guardrail = passo.get("guardrail")
             if guardrail is not None:
-                # TODO: se guardrail["aprovada"], use st.success("Aprovado pelo guardrail");
-                #       senao st.error(f"Bloqueado pelo guardrail: {guardrail['motivo']}")
-                pass
+                if guardrail["aprovada"]:
+                    st.success("Aprovado pelo guardrail")
+                else:
+                    st.error(f"Bloqueado pelo guardrail: {guardrail['motivo']}")
 
             if passo.get("query_sql"):
-                # TODO: mostre o SQL com st.code(passo["query_sql"], language="sql")
-                pass
+                st.code(passo["query_sql"], language="sql")
 
             if not passo["sucesso"]:
                 erro = passo["resultado"].get("erro") if isinstance(passo["resultado"], dict) else passo["resultado"]
@@ -95,7 +99,9 @@ def renderizar_dados(trace: list[dict]) -> None:
     if not consultas:
         return
     resultado = consultas[-1]["resultado"]
-    # TODO: monte um DataFrame com pd.DataFrame(resultado["linhas"]) e exiba com st.dataframe(..., width="stretch")
+    df = pd.DataFrame(resultado["linhas"])
+    st.dataframe(df, width="stretch")
+    desenhar_grafico(df)
 
 
 def metricas_do_banco() -> dict:
@@ -107,15 +113,19 @@ def metricas_do_banco() -> dict:
             linha[0]
             for linha in conexao.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
         ]
-        # TODO: some o COUNT(*) de cada tabela para obter o total de registros
-        registros = 0
+        registros = sum(
+            conexao.execute(f"SELECT COUNT(*) FROM {tabela}").fetchone()[0]
+            for tabela in tabelas
+        )
     return {"status": "conectado", "tabelas": len(tabelas), "registros": registros}
 
 
 def renderizar_sidebar() -> None:
     metricas = metricas_do_banco()
     st.sidebar.header("Saude da base")
-    # TODO: use st.sidebar.metric para "Status" (metricas["status"]), "Tabelas" e "Registros auditados"
+    st.sidebar.metric("Status", metricas["status"])
+    st.sidebar.metric("Tabelas", metricas["tabelas"])
+    st.sidebar.metric("Registros auditados", metricas["registros"])
     st.sidebar.divider()
     if st.sidebar.button("Limpar conversa"):
         st.session_state.messages = []
@@ -128,7 +138,7 @@ def desenhar_grafico(df: pd.DataFrame) -> None:
     categoricas = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
     numericas = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
     if len(categoricas) == 1 and numericas and 1 < len(df) <= 30:
-        # TODO: chame st.bar_chart(df, x=categoricas[0], y=numericas[0])
-        pass
-    
+        st.bar_chart(df, x=categoricas[0], y=numericas[0])
+
+renderizar_sidebar()
 main()
