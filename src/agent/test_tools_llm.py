@@ -42,7 +42,9 @@ if __name__ == "__main__":
         print("RESPOSTA:", response.text)
         # TODO: imprima o historico de chamadas automaticas: percorra response.automatic_function_calling_history
         #       e mostre o nome de cada function_call feita pelo modelo
-        for item in response.automatic_function_calling_history:
-            if hasattr(item, "function_call") and item.function_call:
-                print("CHAMADA:", item.function_call.name)
+        for item in response.automatic_function_calling_history or []:
+            for part in item.parts or []:
+                function_call = getattr(part, "function_call", None)
+                if function_call:
+                    print("CHAMADA:", function_call.name)
         print("-" * 60)
