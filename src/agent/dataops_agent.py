@@ -5,6 +5,7 @@ import sys
 import time
 from contextlib import AsyncExitStack
 from pathlib import Path
+from typing import Any, cast
 
 from dotenv import load_dotenv
 from google import genai
@@ -64,7 +65,7 @@ class DataOpsAgent:
         await self._sessao.initialize()
         catalogo = await self._sessao.list_tools()
         self._config = types.GenerateContentConfig(
-            system_instruction=INSTRUCAO, tools=converter_tools(catalogo.tools)
+            system_instruction=INSTRUCAO, tools=cast(Any, converter_tools(catalogo.tools))
         )
         return self
 
@@ -78,9 +79,16 @@ class DataOpsAgent:
 
         for turno in range(1, self.max_turnos + 1):
             response = await self.client.aio.models.generate_content(
-                model=MODEL, contents=self.historico, config=self._config
+                model=MODEL, contents=cast(Any, self.historico), config=self._config
             )
-            self.historico.append(response.candidates[0].content)
+            candidato = response.candidates[0] if response.candidates else None
+            conteudo_resposta = candidato.content if candidato is not None else None
+            if conteudo_resposta is None:
+                return {
+                    "resposta": response.text or "O modelo nao retornou uma resposta.",
+                    "trace": trace,
+                }
+            self.historico.append(conteudo_resposta)
 
             # TODO: se NAO houver response.function_calls, retorne {"resposta": response.text, "trace": trace}
             if not response.function_calls:
@@ -93,7 +101,11 @@ class DataOpsAgent:
                     raise RuntimeError("Sessao MCP nao inicializada")
                 # TODO: execute a ferramenta com self._sessao.call_tool(chamada.name, dict(chamada.args))
                 #       e guarde o retorno em resultado_mcp
-                resultado_mcp = await self._sessao.call_tool(chamada.name, dict(chamada.args))
+                argumentos = chamada.args or {}
+                nome_ferramenta = chamada.name
+                if nome_ferramenta is None:
+                    raise RuntimeError("Chamada de ferramenta sem nome")
+                resultado_mcp = await self._sessao.call_tool(nome_ferramenta, argumentos)
                 tempo_ms = round((time.perf_counter() - inicio) * 1000, 2)
                 conteudo = ler_resultado(resultado_mcp)
                 falhou = bool(resultado_mcp.isError) or (isinstance(conteudo, dict) and conteudo.get("sucesso") is False)
@@ -103,14 +115,14 @@ class DataOpsAgent:
                 trace.append({
                     "turno": turno,
                     "ferramenta": chamada.name,
-                    "argumentos": dict(chamada.args),
+                    "argumentos": argumentos,
                     "resultado": conteudo,
                     "sucesso": not falhou,
                     "guardrail": conteudo.get("guardrail") if isinstance(conteudo, dict) else None,
-                    "query_sql": dict(chamada.args).get("query"),
+                    "query_sql": argumentos.get("query"),
                     "tempo_ms": tempo_ms,
                 })
-                partes.append(types.Part.from_function_response(name=chamada.name, response={"result": conteudo}))
+                partes.append(types.Part.from_function_response(name=nome_ferramenta, response={"result": conteudo}))
             self.historico.append(types.Content(role="user", parts=partes))
 
         return {"resposta": "Limite de turnos atingido sem resposta conclusiva.", "trace": trace}
