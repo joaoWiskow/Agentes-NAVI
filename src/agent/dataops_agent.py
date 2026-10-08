@@ -82,6 +82,7 @@ class DataOpsAgent:
             )
             self.historico.append(response.candidates[0].content)
 
+            # TODO: se NAO houver response.function_calls, retorne {"resposta": response.text, "trace": trace}
             if not response.function_calls:
                 return {"resposta": response.text, "trace": trace}
 
@@ -90,6 +91,8 @@ class DataOpsAgent:
                 inicio = time.perf_counter()
                 if self._sessao is None:
                     raise RuntimeError("Sessao MCP nao inicializada")
+                # TODO: execute a ferramenta com self._sessao.call_tool(chamada.name, dict(chamada.args))
+                #       e guarde o retorno em resultado_mcp
                 resultado_mcp = await self._sessao.call_tool(chamada.name, dict(chamada.args))
                 tempo_ms = round((time.perf_counter() - inicio) * 1000, 2)
                 conteudo = ler_resultado(resultado_mcp)
