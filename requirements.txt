@@ -4,3 +4,5 @@ mcp<2
 streamlit
 pandas
 pydantic
+pytest
+pytest-asyncio

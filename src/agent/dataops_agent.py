@@ -57,7 +57,7 @@ def ler_resultado(resultado_mcp):
 
 
 class DataOpsAgent:
-    def __init__(self, max_turnos: int = 6, historico: list | None = None, usar_cache: bool = True):
+    def __init__(self, max_turnos: int = 10, historico: list | None = None, usar_cache: bool = True):
         self.max_turnos = max_turnos
         self.usar_cache = usar_cache
         self.cadeia = obter_cadeia()
