@@ -41,7 +41,7 @@ class TestApp(unittest.TestCase):
     def test_pagina_inicial_tem_sugestoes(self):
         at = self._app(ClienteFalso(roteiro_consulta)).run()
         self.assertFalse(at.exception)
-        self.assertGreaterEqual(len([b for b in at.button if str(b.key).startswith("sug_")]), 8)
+        self.assertGreaterEqual(len([b for b in at.button if str(b.key).startswith("sug_")]), 4)
 
     def test_pergunta_gera_tabela_grafico_e_badges(self):
         at = self._app(ClienteFalso(roteiro_consulta)).run()

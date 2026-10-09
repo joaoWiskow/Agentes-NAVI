@@ -734,12 +734,7 @@ def main() -> None:
         "seguras, visualizações analíticas, cache e guardrails para "
         "resultados rastreáveis e confiáveis."
     )
-    # Sugestões rápidas visíveis na área principal (duplicadas da sidebar)
-    cols = st.columns(len(SUGESTOES)) if len(SUGESTOES) <= 4 else st.columns(4)
-    for i, (rotulo, texto) in enumerate(SUGESTOES):
-        key = f"sug_{i}"
-        col = cols[i % len(cols)]
-        col.button(rotulo, key=key, on_click=definir_pendente, args=(texto,))
+    # Sugestões visíveis estão apenas na sidebar (removidos botões duplicados no corpo)
 
     for indice, mensagem in enumerate(st.session_state.messages):
         renderizar_mensagem(mensagem, indice)
