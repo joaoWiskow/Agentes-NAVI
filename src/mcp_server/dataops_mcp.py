@@ -1,12 +1,12 @@
 import sys
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.fastmcp import FastMCP
 
 from src.agent.guardrails import validar_query_segura
 from src.tools import profiling_tools, query_tools, schema_tools
 
 
-mcp = MCPServer("dataops-agent")
+mcp = FastMCP("dataops-agent")
 
 
 @mcp.tool()
@@ -59,6 +59,18 @@ def calcular_estatisticas_coluna(
         nome_tabela,
         nome_coluna
     )
+
+
+@mcp.tool()
+def contar_nulos_e_distintos(nome_tabela: str, nome_coluna: str) -> dict:
+    """Mede a qualidade de uma coluna: total de linhas, nulos, valores distintos e % preenchido."""
+    return profiling_tools.contar_nulos_e_distintos(nome_tabela, nome_coluna)
+
+
+@mcp.tool()
+def amostrar_linhas(nome_tabela: str, qtd: int = 5) -> list[dict]:
+    """Retorna ate 20 linhas de exemplo de uma tabela, para conhecer o formato dos dados."""
+    return profiling_tools.amostrar_linhas(nome_tabela, qtd)
 
 
 if __name__ == "__main__":

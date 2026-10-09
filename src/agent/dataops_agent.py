@@ -5,6 +5,7 @@ import sys
 import time
 from contextlib import AsyncExitStack
 from pathlib import Path
+from typing import Any, cast
 
 from dotenv import load_dotenv
 from google import genai
@@ -12,8 +13,18 @@ from google.genai import types
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from src.agent.cache import (
+    CACHE_FERRAMENTAS,
+    CACHE_RESPOSTAS,
+    FERRAMENTAS_CACHEAVEIS,
+    chave_ferramenta,
+    normalizar_pergunta,
+    parece_followup,
+)
+from src.agent.resiliencia import ErroAltaDemanda, classificar_erro, obter_cadeia
+
 load_dotenv()
-MODEL = "gemini-3.1-flash-lite"
+MAX_CHARS_PERGUNTA = 1000
 RAIZ = Path(__file__).resolve().parents[2]
 
 INSTRUCAO = (
@@ -46,8 +57,10 @@ def ler_resultado(resultado_mcp):
 
 
 class DataOpsAgent:
-    def __init__(self, max_turnos: int = 6, historico: list | None = None):
+    def __init__(self, max_turnos: int = 10, historico: list | None = None, usar_cache: bool = True):
         self.max_turnos = max_turnos
+        self.usar_cache = usar_cache
+        self.cadeia = obter_cadeia()
         self.client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         # O historico pode ser injetado: o Streamlit (Dia 19) recria o agente a cada pergunta e reaproveita a conversa
         self.historico: list[types.Content] = historico if historico is not None else []
@@ -64,56 +77,172 @@ class DataOpsAgent:
         await self._sessao.initialize()
         catalogo = await self._sessao.list_tools()
         self._config = types.GenerateContentConfig(
-            system_instruction=INSTRUCAO, tools=converter_tools(catalogo.tools)
+            system_instruction=INSTRUCAO, tools=cast(Any, converter_tools(catalogo.tools))
         )
         return self
 
     async def __aexit__(self, *erro):
         await self._pilha.aclose()
 
-    async def perguntar(self, pergunta: str) -> dict:
-        """Retorna {"resposta": str, "trace": list[dict]}."""
+    # ------------------------------------------------------------------ cache de resposta
+    def _registrar_turno_no_historico(self, pergunta: str, resposta: str) -> None:
+        """Mantem a memoria do modelo coerente mesmo quando a resposta veio do cache."""
         self.historico.append(types.Content(role="user", parts=[types.Part(text=pergunta)]))
-        trace: list[dict] = []
+        self.historico.append(types.Content(role="model", parts=[types.Part(text=resposta)]))
 
-        for turno in range(1, self.max_turnos + 1):
-            response = await self.client.aio.models.generate_content(
-                model=MODEL, contents=self.historico, config=self._config
+    def _resposta_do_cache(self, pergunta: str, chave: str, aceitar_expirado: bool, inicio: float) -> dict | None:
+        acerto = CACHE_RESPOSTAS.buscar(chave, aceitar_expirado=aceitar_expirado)
+        if acerto is None:
+            return None
+        guardado, situacao = acerto
+        self._registrar_turno_no_historico(pergunta, guardado["resposta"])
+        meta = {
+            "cache": "resposta" if situacao == "fresco" else "expirado",
+            "modelo": None, "fallback": False, "tentativas": 0, "chamadas_llm": 0,
+            "eventos": [], "degradado": situacao == "expirado",
+            "tempo_total_ms": round((time.perf_counter() - inicio) * 1000, 2),
+        }
+        return {"resposta": guardado["resposta"], "trace": guardado["trace"], "meta": meta}
+
+    # ------------------------------------------------------------------ execucao de ferramenta
+    async def _executar_ferramenta(self, nome: str, argumentos: dict, falhas_vistas: dict) -> tuple[Any, bool, bool]:
+        """Retorna (conteudo, falhou, veio_do_cache). Nunca levanta excecao: erro vira observacao para o modelo."""
+        if self._sessao is None:
+            raise RuntimeError("Sessao MCP nao inicializada")
+        chave = chave_ferramenta(nome, argumentos)
+
+        # ANTI-LOOP: o modelo repetiu exatamente uma chamada que ja falhou -> nao gastamos outra ida ao banco.
+        if chave in falhas_vistas:
+            anterior = falhas_vistas[chave]
+            conteudo = dict(anterior) if isinstance(anterior, dict) else {"sucesso": False, "erro": str(anterior)}
+            conteudo["dica"] = (
+                "Voce ja tentou exatamente esta chamada e ela falhou. Nao repita: consulte o schema "
+                "(descrever_schema) ou reescreva a consulta de forma diferente."
             )
-            self.historico.append(response.candidates[0].content)
+            return conteudo, True, False
 
-            # TODO: se NAO houver response.function_calls, retorne {"resposta": response.text, "trace": trace}
-            if not response.function_calls:
-                return {"resposta": response.text, "trace": trace}
+        if self.usar_cache and nome in FERRAMENTAS_CACHEAVEIS:
+            acerto = CACHE_FERRAMENTAS.buscar(chave)
+            if acerto is not None:
+                return acerto[0], False, True
 
-            partes = []
-            for chamada in response.function_calls:
-                inicio = time.perf_counter()
-                if self._sessao is None:
-                    raise RuntimeError("Sessao MCP nao inicializada")
-                # TODO: execute a ferramenta com self._sessao.call_tool(chamada.name, dict(chamada.args))
-                #       e guarde o retorno em resultado_mcp
-                resultado_mcp = await self._sessao.call_tool(chamada.name, dict(chamada.args))
-                tempo_ms = round((time.perf_counter() - inicio) * 1000, 2)
-                conteudo = ler_resultado(resultado_mcp)
-                falhou = bool(resultado_mcp.isError) or (isinstance(conteudo, dict) and conteudo.get("sucesso") is False)
+        try:
+            resultado_mcp = await self._sessao.call_tool(nome, argumentos)
+            conteudo = ler_resultado(resultado_mcp)
+            falhou = bool(resultado_mcp.isError) or (isinstance(conteudo, dict) and conteudo.get("sucesso") is False)
+        except Exception as erro:  # noqa: BLE001 - falha de transporte/MCP vira observacao, nao derruba o turno
+            conteudo = {"sucesso": False, "erro": f"Falha ao executar '{nome}': {type(erro).__name__}: {erro}"}
+            falhou = True
 
-                # AUTO-RECUPERACAO: o erro (do guardrail ou do SQLite) volta ao modelo como observacao normal;
-                # ele le a mensagem, ajusta o SQL e tenta de novo no proximo turno.
-                trace.append({
-                    "turno": turno,
-                    "ferramenta": chamada.name,
-                    "argumentos": dict(chamada.args),
-                    "resultado": conteudo,
-                    "sucesso": not falhou,
-                    "guardrail": conteudo.get("guardrail") if isinstance(conteudo, dict) else None,
-                    "query_sql": dict(chamada.args).get("query"),
-                    "tempo_ms": tempo_ms,
-                })
-                partes.append(types.Part.from_function_response(name=chamada.name, response={"result": conteudo}))
-            self.historico.append(types.Content(role="user", parts=partes))
+        if falhou:
+            falhas_vistas[chave] = conteudo
+        elif self.usar_cache and nome in FERRAMENTAS_CACHEAVEIS:
+            CACHE_FERRAMENTAS.guardar(chave, conteudo)
+        return conteudo, falhou, False
 
-        return {"resposta": "Limite de turnos atingido sem resposta conclusiva.", "trace": trace}
+    # ------------------------------------------------------------------ loop principal
+    async def perguntar(self, pergunta: str) -> dict:
+        """Retorna {"resposta": str, "trace": list[dict], "meta": dict}."""
+        inicio_total = time.perf_counter()
+        pergunta = (pergunta or "").strip()
+        meta: dict = {
+            "cache": None, "modelo": None, "fallback": False, "tentativas": 0, "chamadas_llm": 0,
+            "eventos": [], "degradado": False, "tempo_total_ms": 0.0,
+        }
+
+        def _fechar(resposta: str, trace: list[dict]) -> dict:
+            meta["tempo_total_ms"] = round((time.perf_counter() - inicio_total) * 1000, 2)
+            return {"resposta": resposta, "trace": trace, "meta": meta}
+
+        # Validacao de entrada barata, antes de gastar qualquer chamada.
+        if not pergunta:
+            return _fechar("Escreva uma pergunta sobre os dados para eu poder ajudar.", [])
+        if len(pergunta) > MAX_CHARS_PERGUNTA:
+            return _fechar(f"A pergunta tem {len(pergunta)} caracteres; resuma para ate {MAX_CHARS_PERGUNTA}.", [])
+
+        # ELO 1 da cadeia: cache de resposta (so para perguntas autocontidas).
+        chave_resposta = normalizar_pergunta(pergunta)
+        cacheavel = self.usar_cache and not parece_followup(pergunta) and bool(chave_resposta)
+        if cacheavel:
+            do_cache = self._resposta_do_cache(pergunta, chave_resposta, aceitar_expirado=False, inicio=inicio_total)
+            if do_cache is not None:
+                return do_cache
+
+        self.historico.append(types.Content(role="user", parts=[types.Part(text=pergunta)]))
+        tamanho_antes = len(self.historico) - 1  # para desfazer o historico se a pergunta falhar de vez
+        trace: list[dict] = []
+        falhas_vistas: dict = {}
+
+        try:
+            for turno in range(1, self.max_turnos + 1):
+                # ELOS 2..N: retry/backoff -> modelos de fallback -> disjuntor (ver resiliencia.py)
+                chamada = await self.cadeia.gerar(self.client, cast(Any, self.historico), self._config)
+                response = chamada.resposta
+                meta["chamadas_llm"] += 1
+                meta["tentativas"] += chamada.tentativas
+                meta["modelo"] = chamada.modelo
+                meta["fallback"] = meta["fallback"] or chamada.fallback
+                meta["eventos"].extend(chamada.eventos)
+
+                self.historico.append(response.candidates[0].content)
+
+                if not response.function_calls:
+                    texto = response.text or "O modelo nao retornou texto. Tente reformular a pergunta."
+                    # So guardamos respostas conclusivas e sem erro de ferramenta pendente.
+                    if cacheavel and response.text:
+                        CACHE_RESPOSTAS.guardar(chave_resposta, {"resposta": texto, "trace": trace})
+                    return _fechar(texto, trace)
+
+                partes = []
+                for chamada_ferramenta in response.function_calls:
+                    nome_ferramenta = chamada_ferramenta.name
+                    if nome_ferramenta is None:
+                        raise RuntimeError("Chamada de ferramenta sem nome")
+                    argumentos = dict(chamada_ferramenta.args or {})
+
+                    inicio = time.perf_counter()
+                    conteudo, falhou, do_cache = await self._executar_ferramenta(nome_ferramenta, argumentos, falhas_vistas)
+                    tempo_ms = round((time.perf_counter() - inicio) * 1000, 2)
+
+                    # AUTO-RECUPERACAO: o erro (do guardrail ou do SQLite) volta ao modelo como observacao normal;
+                    # ele le a mensagem, ajusta o SQL e tenta de novo no proximo turno.
+                    trace.append({
+                        "turno": turno,
+                        "ferramenta": nome_ferramenta,
+                        "argumentos": argumentos,
+                        "resultado": conteudo,
+                        "sucesso": not falhou,
+                        "guardrail": conteudo.get("guardrail") if isinstance(conteudo, dict) else None,
+                        "query_sql": argumentos.get("query"),
+                        "tempo_ms": tempo_ms,
+                        "cache": do_cache,
+                    })
+                    partes.append(types.Part.from_function_response(name=nome_ferramenta, response={"result": conteudo}))
+                self.historico.append(types.Content(role="user", parts=partes))
+
+            return _fechar("Limite de turnos atingido sem resposta conclusiva. Tente uma pergunta mais especifica.", trace)
+
+        except ErroAltaDemanda as erro:
+            meta["eventos"].extend(erro.eventos)
+            meta["degradado"] = True
+            del self.historico[tamanho_antes:]  # a pergunta nao foi respondida: nao poluimos a memoria
+            # ULTIMO ELO: cache expirado e melhor que nada.
+            if self.usar_cache and chave_resposta and not parece_followup(pergunta):
+                velho = self._resposta_do_cache(pergunta, chave_resposta, aceitar_expirado=True, inicio=inicio_total)
+                if velho is not None:
+                    velho["meta"]["eventos"] = meta["eventos"]
+                    velho["resposta"] = "(Servico de IA sobrecarregado: mostrando a ultima resposta salva.)\n\n" + velho["resposta"]
+                    return velho
+            return _fechar(
+                "O servico de IA esta com alta demanda agora e nao consegui concluir. "
+                "Nada foi alterado nos dados. Tente novamente em alguns instantes.",
+                trace,
+            )
+        except Exception as erro:  # noqa: BLE001
+            del self.historico[tamanho_antes:]
+            meta["degradado"] = True
+            meta["eventos"].append({"tipo": classificar_erro(erro), "detalhe": f"{type(erro).__name__}: {str(erro)[:160]}"})
+            return _fechar(f"Nao consegui concluir esta pergunta ({type(erro).__name__}). Tente reformular.", trace)
 
 
 async def demo() -> None:
